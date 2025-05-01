@@ -1,1 +1,536 @@
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.*;
+import java.util.regex.Pattern;
+import java.io.*;
 
+public class BasicBankingSystem {
+
+    private final Scanner input = new Scanner(System.in);
+    private static final Random random = new Random();
+
+    // File name used for persistence.
+    private static final String DATA_FILE = "bank_data.ser";
+
+    // Container for all persistent data.
+    private BankData data;
+
+    private void saveData() {
+        try (FileOutputStream fos = new FileOutputStream(DATA_FILE);
+             ObjectOutputStream oos = new ObjectOutputStream(fos)) {
+            oos.writeObject(data);
+            System.out.println("Data saved successfully.");
+        } catch (IOException e) {
+            System.out.println("Error saving data: " + e.getMessage());
+        }
+    }
+
+    private void loadData() {
+        File file = new File(DATA_FILE);
+        if (file.exists()) {
+            try (FileInputStream fis = new FileInputStream(file);
+                 ObjectInputStream ois = new ObjectInputStream(fis)) {
+                data = (BankData) ois.readObject();
+                System.out.println("Data loaded successfully.");
+            } catch (IOException | ClassNotFoundException e) {
+                System.out.println("Error loading data: " + e.getMessage());
+                data = new BankData();
+            }
+        } else {
+            data = new BankData();
+        }
+    }
+
+    // Attempt to load data on startup.
+    public BasicBankingSystem() {
+        loadData();
+    }
+
+    public static class BankData implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+        public HashSet<Long> existingAccountNumbers = new HashSet<>();
+        public HashMap<Long, Account> existingAccounts = new HashMap<>();
+        public HashMap<String, Long> existingEmails = new HashMap<>();
+        public HashMap<Long, Long> existingMobileNumbers = new HashMap<>();
+    }
+
+    public static class Transaction implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+        private final long transactionId;
+        private final long accountNumber;
+        private final String transactionType; // CREDIT or DEBIT
+        private final double amount;
+        private final Date date;
+        private final String notes;
+
+        public Transaction(long accountNumber,long transactionId, String transactionType, double amount, String notes) {
+            this.transactionId = transactionId;
+            this.accountNumber = accountNumber;
+            this.transactionType = transactionType;
+            this.amount = amount;
+            this.date = new Date();
+            this.notes = notes;
+        }
+
+        @Override
+        public String toString() {
+            return "Transaction { " +
+                    "ID: " + transactionId +
+                    ", Account: " + accountNumber +
+                    ", Type: " + transactionType +
+                    ", Amount: " + amount +
+                    ", Date: " + date +
+                    ", Notes: '" + notes + '\'' +
+                    " }";
+        }
+
+    }
+
+    public static class Account implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+        private String name;
+        private long mobileNumber;
+        private long aadharNumber;
+        private String emailID;
+        private final long accountNumber;
+        private final String hashedPassword; // SHA-256 hashed password
+        private double balance;
+        private final List<Transaction> transactions;
+
+        public Account(String name, String emailID, long mobileNumber, long aadharNumber, long accountNumber, String hashedPassword) {
+            this.name = name;
+            this.emailID = emailID;
+            this.mobileNumber = mobileNumber;
+            this.aadharNumber = aadharNumber;
+            this.accountNumber = accountNumber;
+            this.hashedPassword = hashedPassword;
+            this.balance = 0.0;
+            this.transactions = new ArrayList<>();
+        }
+
+        // Validate the entered password.
+        public boolean authenticate(String rawPassword) {
+            return verifyPassword(rawPassword, hashedPassword);
+        }
+
+        // Deposit money.
+        public void deposit(double amount, String notes) {
+            balance += amount;
+            transactions.add(new Transaction(accountNumber, random.nextLong(12),"CREDIT", amount, notes));
+            System.out.println("Deposited " + amount + ". New Balance: " + balance);
+        }
+
+        // Withdraw money if sufficient balance.
+        public void withdraw(double amount, String notes) {
+            if (amount > balance) {
+                System.out.println("Insufficient funds. Current Balance: " + balance);
+            } else {
+                balance -= amount;
+                transactions.add(new Transaction(accountNumber,random.nextLong(12), "DEBIT", amount, notes));
+                System.out.println("Withdrew " + amount + ". New Balance: " + balance);
+            }
+        }
+
+        // Display all transactions for this account.
+        public void displayTransactions() {
+            if (transactions.isEmpty()){
+                System.out.println("No transactions available.");
+            } else {
+                System.out.println("Transaction History for Account " + accountNumber + ":");
+                for (Transaction t : transactions) {
+                    System.out.println(t);
+                }
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "Account { " +
+                    "AccountNumber: " + accountNumber +
+                    ", Name: " + name +
+                    ", Email: " + emailID +
+                    ", Mobile: " + mobileNumber +
+                    ", Aadhar: " + aadharNumber +
+                    ", Balance: " + balance +
+                    " }";
+        }
+    }
+
+    String checkValidName() {
+        boolean validName = false;
+        String name = "";
+        while (!validName) {
+            System.out.print("Enter Your Name: ");
+            name = input.nextLine();
+            String regex = "^[a-zA-Z]+( [a-zA-Z]+)*$";
+            validName = Pattern.matches(regex, name);
+            if (!validName)
+                System.out.println("Invalid Name! Please use alphabetic characters only.");
+        }
+        return name;
+    }
+
+    long checkValidMobileNumber() {
+        boolean valid = false;
+        long number = 0;
+        while (!valid) {
+            System.out.print("Enter Your Mobile Number: ");
+            number = input.nextLong();
+            input.nextLine();
+            if (String.valueOf(number).length() == 10)
+                valid = true;
+            else
+                System.out.println("Invalid Mobile Number! Please enter a 10-digit number.");
+        }
+        return number;
+    }
+
+    long checkValidAadharNumber() {
+        boolean valid = false;
+        long number = 0;
+        while (!valid) {
+            System.out.print("Enter Your Aadhar Number: ");
+            number = input.nextLong();
+            input.nextLine();
+            if (String.valueOf(number).length() == 12)
+                valid = true;
+            else
+                System.out.println("Invalid Aadhar Number! Please enter a 12-digit number.");
+        }
+        return number;
+    }
+
+    String checkValidEmail() {
+        boolean valid = false;
+        String email = "";
+        while (!valid) {
+            System.out.print("Enter Your Email: ");
+            email = input.nextLine();
+            String regex = "^[a-zA-Z0-9_.+%]+@[a-zA-Z0-9_.+%]+\\.[a-zA-Z]{2,}$";
+            valid = Pattern.matches(regex, email);
+            if (!valid)
+                System.out.println("Invalid Email! Please enter a valid email address.");
+        }
+        return email;
+    }
+
+    // Generate a unique account number.
+    long generateAccountNumber() {
+        long accountNumber;
+        do {
+            accountNumber = 100000000000L + Math.abs(random.nextLong() % 900000000000L);
+        } while (data.existingAccountNumbers.contains(accountNumber));
+        data.existingAccountNumbers.add(accountNumber);
+        return accountNumber;
+    }
+
+    int generateOtp() {
+        int otp = 100000 + random.nextInt(900000);
+        System.out.println("Generated OTP: " + otp);
+        return otp;
+    }
+
+    boolean verifyOtp() {
+        int otp = generateOtp();
+        System.out.print("Enter OTP: ");
+        int entered = input.nextInt();
+        input.nextLine();
+        if (entered == otp) {
+            System.out.println("OTP verified.");
+            return true;
+        } else {
+            System.out.println("Incorrect OTP. Try again.");
+            int attempts = 1;
+            while (attempts < 3) {
+                System.out.print("Enter 1 to resend OTP, 2 to re-enter OTP, or 3 to cancel: ");
+                int choice = input.nextInt();
+                input.nextLine();
+                if (choice == 3) {
+                    return false;
+                } else if (choice == 1) {
+                    otp = generateOtp();
+                } else if (choice == 2) {
+                    System.out.print("Enter OTP: ");
+                    entered = input.nextInt();
+                    input.nextLine();
+                    if (entered == otp) {
+                        System.out.println("OTP verified.");
+                        return true;
+                    } else {
+                        System.out.println("Incorrect OTP.");
+                    }
+                }
+                attempts++;
+            }
+            return false;
+        }
+    }
+
+    boolean checkValidPassword(String password) {
+        if (password.length() < 8) {
+            return false;
+        }
+        String upperCasePattern = ".*[A-Z].*";
+        String lowerCasePattern = ".*[a-z].*";
+        String digitPattern = ".*[0-9].*";
+        String specialCharPattern = ".*[!@#$%^&*()\\-_=+<>?].*";
+
+        boolean hasUpperCase = password.matches(upperCasePattern);
+        boolean hasLowerCase = password.matches(lowerCasePattern);
+        boolean hasDigit = password.matches(digitPattern);
+        boolean hasSpecialChar = password.matches(specialCharPattern);
+        return hasUpperCase && hasLowerCase && hasDigit && hasSpecialChar;
+    }
+
+    String generatePassword() {
+        int len = 12 + random.nextInt(5);  // Length between 12 and 16
+        StringBuilder password = new StringBuilder();
+        String UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        String LOWER = "abcdefghijklmnopqrstuvwxyz";
+        String DIGITS = "0123456789";
+        String SPECIAL = "!@#$%^&*()-_=+<>?";
+        String ALL = UPPER + LOWER + DIGITS + SPECIAL;
+        int choice = 1;
+        for (int i = 0; i < len; i++) {
+            if (i % 3 == 0) {
+                switch (choice) {
+                    case 1:
+                        password.append(UPPER.charAt(random.nextInt(UPPER.length())));
+                        break;
+                    case 2:
+                        password.append(LOWER.charAt(random.nextInt(LOWER.length())));
+                        break;
+                    case 3:
+                        password.append(DIGITS.charAt(random.nextInt(DIGITS.length())));
+                        break;
+                    default:
+                        password.append(SPECIAL.charAt(random.nextInt(SPECIAL.length())));
+                        break;
+                }
+                choice = (choice % 4) + 1;
+            } else {
+                password.append(ALL.charAt(random.nextInt(ALL.length())));
+            }
+        }
+        return password.toString();
+    }
+
+    String createPassword() {
+        System.out.print("Enter 1 for System Generated Password, 2 to set your own password: ");
+        int choice = input.nextInt();
+        input.nextLine();
+        String password = "";
+        if (choice == 1) {
+            password = generatePassword();
+            System.out.println("Generated Password: " + password);
+        } else if (choice == 2) {
+            Console console = System.console();
+            for (int i = 0; i < 3; i++) {
+                System.out.println("Password must be at least 8 characters long and contain an uppercase letter, " +
+                        "a lowercase letter, a digit, and a special character.");
+                if (console != null) {
+                    char[] passArray = console.readPassword("Enter Password: ");
+                    password = new String(passArray);
+                } else {
+                    System.out.print("Enter Password: ");
+                    password = input.nextLine();
+                }
+                if (checkValidPassword(password)) {
+                    break;
+                } else {
+                    System.out.println("Password does not meet the required criteria. Please try again.");
+                }
+            }
+        }
+        return hashPassword(password);
+    }
+
+    static String hashPassword(String password) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(password.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1)
+                    hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    static boolean verifyPassword(String rawPassword, String hashedPassword) {
+        return hashPassword(rawPassword).equals(hashedPassword);
+    }
+
+    public void createAccount() {
+        System.out.println("=========== Account Creation ===========");
+        String name = checkValidName();
+        long mobile = checkValidMobileNumber();
+        long aadhar = checkValidAadharNumber();
+        String email = checkValidEmail();
+        long accountNumber = generateAccountNumber();
+
+        // OTP Verification
+        if (!verifyOtp()) {
+            System.out.println("OTP verification failed. Account creation aborted.");
+            return;
+        }
+
+        String hashedPwd = createPassword();
+        Account newAccount = new Account(name, email, mobile, aadhar, accountNumber, hashedPwd);
+        data.existingAccounts.put(accountNumber, newAccount);
+        data.existingEmails.put(email, accountNumber);
+        data.existingMobileNumbers.put(mobile, accountNumber);
+
+        System.out.println("Account created successfully!");
+        System.out.println(newAccount);
+    }
+
+    public Account login() {
+        System.out.print("Enter Account Number: ");
+        long accNum = input.nextLong();
+        input.nextLine();
+        Account acc = data.existingAccounts.get(accNum);
+        if (acc == null) {
+            System.out.println("Account not found!");
+            return null;
+        }
+        System.out.print("Enter Password: ");
+        String password = input.nextLine();
+        if (acc.authenticate(password)) {
+            System.out.println("Login Successful!");
+            return acc;
+        } else {
+            System.out.println("Invalid password!");
+            return null;
+        }
+    }
+
+    public void depositMoney(Account acc) {
+        if (acc != null) {
+            System.out.print("Enter amount to deposit: ");
+            double amount = input.nextDouble();
+            input.nextLine();
+            System.out.print("Enter deposit notes: ");
+            String notes = input.nextLine();
+            acc.deposit(amount, notes);
+        }
+    }
+
+    public void withdrawMoney(Account acc) {
+        if (acc != null) {
+            System.out.print("Enter amount to withdraw: ");
+            double amount = input.nextDouble();
+            input.nextLine();
+            System.out.print("Enter withdrawal notes: ");
+            String notes = input.nextLine();
+            acc.withdraw(amount, notes);
+        }
+    }
+    public void checkBalance(Account acc){
+        if(acc != null){
+            System.out.println("Your bank balance is: " + acc.balance);
+        }
+    }
+
+    public void displayTransactions(Account acc) {
+        if (acc != null) {
+            acc.displayTransactions();
+        }
+    }
+    private void sleep(int time){
+        try {
+            Thread.sleep(time * 100);
+        } catch (InterruptedException e){
+            System.out.println(e.getMessage());
+        }
+    }
+    private void AccountMenu(){
+        Account acc = login();
+        sleep(8);
+        System.out.println("================== Welcome in Your Account =====================");
+        boolean exit = false;
+        while (!exit){
+            System.out.println("1. for Deposit");
+            System.out.println("2. for withdrawal");
+            System.out.println("3. for view transaction history");
+            System.out.println("4. for view balance");
+            System.out.println("5. for go in main menu");
+            System.out.print("choose an option: ");
+            byte option= input.nextByte();
+            switch (option){
+                case 1:
+                    depositMoney(acc);
+                    sleep(15);
+                    break;
+                case 2:
+                    withdrawMoney(acc);
+                    sleep(15);
+                    break;
+                case 3:
+                    displayTransactions(acc);
+                    sleep(30);
+                    break;
+                case 4:
+                    checkBalance(acc);
+                    sleep(12);
+                    break;
+                case 5:
+                    System.out.println("Exit from Account");
+                    sleep(2);
+                    exit = true;
+                    break;
+                default:
+                    System.out.println("Enter valid Number");
+                    sleep(15);
+            }
+
+        }
+    }
+    // Main Menu
+    public void menu() {
+        System.out.println("\n==================== Welcome in Basic Bank Account System =========================");
+
+        boolean exit = false;
+        while (!exit) {
+            System.out.println("1. Create Account");
+            System.out.println("2. Login in Your Account");
+            System.out.println("3. Exit");
+            System.out.print("Choose an option: ");
+            int option = input.nextInt();
+            input.nextLine();
+            switch (option) {
+                case 1:
+                    createAccount();
+                    sleep(20);
+                    break;
+                case 2:
+                    AccountMenu();
+                    sleep(1);
+                    break;
+                case 3:
+                    exit = true;
+                    saveData();
+                    sleep(12);
+                    System.out.println("Exiting system. Goodbye!");
+                    break;
+                default:
+                    System.out.println("Invalid option. Please try again.");
+                    sleep(10);
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        BasicBankingSystem bank = new BasicBankingSystem();
+        bank.menu();
+    }
+}
