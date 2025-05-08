@@ -2,6 +2,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.io.*;
@@ -94,6 +96,7 @@ public class BasicBankingSystem {
         @Serial
         private static final long serialVersionUID = 1L;
         private String name;
+        private Date DOB;
         private long mobileNumber;
         private long aadharNumber;
         private String emailID;
@@ -102,8 +105,9 @@ public class BasicBankingSystem {
         private double balance;
         private final List<Transaction> transactions;
 
-        public Account(String name, String emailID, long mobileNumber, long aadharNumber, long accountNumber, String hashedPassword) {
+        public Account(String name,Date DOB, String emailID, long mobileNumber, long aadharNumber, long accountNumber, String hashedPassword) {
             this.name = name;
+            this.DOB = DOB;
             this.emailID = emailID;
             this.mobileNumber = mobileNumber;
             this.aadharNumber = aadharNumber;
@@ -239,6 +243,21 @@ public class BasicBankingSystem {
                 System.out.println("Invalid Email! Please enter a valid email address.");
         }
         return email;
+    }
+
+    Date DOB(){
+        System.out.print("Enter Your Date of birth in (dd-mm-yyyy): ");
+        String date = input.nextLine();
+        SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+        Date dob = null;
+        while (dob == null){
+            try {
+                dob = sdf.parse(date);
+            } catch (ParseException e) {
+                System.out.println("Invalid formate!");
+            }
+        }
+        return dob;
     }
 
     boolean checkValidPassword(String password) {
@@ -382,11 +401,11 @@ public class BasicBankingSystem {
         if (choice == 1) {
             password = generatePassword();
             System.out.println("Generated Password: " + password);
-        } else if (choice == 2) {
+        } else {
             Console console = System.console();
             for (int i = 0; i < 3; i++) {
-                System.out.println("Password must be at least 8 characters long and contain an uppercase letter, " +
-                        "a lowercase letter, a digit, and a special character.");
+                System.out.println("Password must contain 8 characters and must contain uppercase letter, " +
+                        "lowercase letter, digit, and special character.");
                 if (console != null) {
                     char[] passArray = console.readPassword("Enter Password: ");
                     password = new String(passArray);
@@ -399,6 +418,10 @@ public class BasicBankingSystem {
                 } else {
                     System.out.println("Password does not meet the required criteria. Please try again.");
                 }
+                if(i == 2){
+                    System.out.println("----You exceed limit, So default password generated!-----");
+                    password = generatePassword();
+                }
             }
         }
         return hashPassword(password);
@@ -407,6 +430,7 @@ public class BasicBankingSystem {
     public void createAccount() {
         System.out.println("=========== Account Creation ===========");
         String name = name();
+        Date DOB = DOB();
         long mobile = mobileNumber();
         long aadhar = aadharNumber();
         String email = email();
@@ -419,7 +443,7 @@ public class BasicBankingSystem {
         }
 
         String hashedPwd = createPassword();
-        Account newAccount = new Account(name, email, mobile, aadhar, accountNumber, hashedPwd);
+        Account newAccount = new Account(name, DOB, email, mobile, aadhar, accountNumber, hashedPwd);
         data.existingAccounts.put(accountNumber, newAccount);
         data.existingEmails.put(email, accountNumber);
         data.existingMobileNumbers.put(mobile, accountNumber);
@@ -484,6 +508,12 @@ public class BasicBankingSystem {
             System.out.println("Account Not Found");
             return null;
         }
+        System.out.print("Enter Password: ");
+        String password = input.nextLine();
+        if(!acc.authenticate(password)){
+            System.out.println("Invalid Password!");
+            return null;
+        }
         if (!verifyOtp()) {
             System.out.println("OTP verification failed. Operation aborted.");
             return null;
@@ -528,6 +558,50 @@ public class BasicBankingSystem {
         if (acc != null) {
             acc.setHashedPassword(createPassword());
             System.out.println("Password Successfully Updated!");
+        }
+    }
+
+    void resetPassword(){
+        System.out.print("Do you want to Update Password (y/n): ");
+        String str = input.nextLine().trim().toLowerCase();
+        if (!str.equals("y")) {
+            return;
+        }
+        System.out.print("Enter Account Number: ");
+        long accNum = input.nextLong();
+        input.nextLine();
+        Account acc = data.existingAccounts.get(accNum);
+        if (acc == null) {
+            System.out.println("Account Not Found");
+            return;
+        }
+        System.out.print("Enter Your Date of birth in (dd-mm-yyyy): ");
+        String date = input.nextLine();
+        SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+        Date dob = null;
+        while (dob == null){
+            try {
+                dob = sdf.parse(date);
+            } catch (ParseException e) {
+                System.out.println("Invalid formate!");
+            }
+        }
+        if(!(acc.DOB == dob)){
+            System.out.println("Invalid Data fo Birth!");
+            return;
+        }
+        System.out.print("Enter Mobile number: ");
+        long mob = input.nextLong();
+        input.nextLine();
+        if(acc.mobileNumber == mob){
+            if(verifyOtp()){
+                acc.hashedPassword = createPassword();
+                System.out.println("----------Password Reset Successfully!----------");
+            } else {
+                System.out.println("Invalid OTP!");
+            }
+        } else {
+            System.out.println("Invalid Mobile Number");
         }
     }
 
@@ -637,6 +711,7 @@ public class BasicBankingSystem {
         System.out.println("4. Update Mobile Number");
         System.out.println("5. Update Aadhar Number");
         System.out.println("6. Update Email ID");
+        System.out.println("7. Reset Password");
         System.out.print("Enter Option: ");
         byte option = input.nextByte();
         switch (option){
@@ -657,6 +732,9 @@ public class BasicBankingSystem {
                 break;
             case 6:
                 updateEmailID();
+                break;
+            case 7:
+                resetPassword();
                 break;
             default:
                 System.out.println("Enter valid option");
