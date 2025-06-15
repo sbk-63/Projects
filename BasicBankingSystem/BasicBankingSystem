@@ -2,9 +2,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.sql.*;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.Date;
 import java.util.regex.Pattern;
 import java.io.*;
 
@@ -12,89 +14,75 @@ public class BasicBankingSystem {
 
     private final Scanner input = new Scanner(System.in);
     private static final SecureRandom random = new SecureRandom();
+    private final DatabaseManager dbManager;
+    private final Console console = System.console();
 
-    // File name used for persistence.
-    private static final String DATA_FILE = "bank_data.ser";
+    // Database connection details
+    private static final String DB_URL = "jdbc:mysql://localhost:3306/banking_system";
+    private static final String DB_USER = "root";
+    private static final String DB_PASSWORD = "123456";
 
-    // Container for all persistent data.
-    private BankData data;
-
-    private void saveData() {
-        try (FileOutputStream fos = new FileOutputStream(DATA_FILE);
-             ObjectOutputStream oos = new ObjectOutputStream(fos)) {
-            oos.writeObject(data);
-            System.out.println("Data saved successfully.");
-        } catch (IOException e) {
-            System.out.println("Error saving data: " + e.getMessage());
-        }
-    }
-
-    private void loadData() {
-        File file = new File(DATA_FILE);
-        if (file.exists()) {
-            try (FileInputStream fis = new FileInputStream(file);
-                 ObjectInputStream ois = new ObjectInputStream(fis)) {
-                data = (BankData) ois.readObject();
-                System.out.println("Data loaded successfully.");
-            } catch (IOException | ClassNotFoundException e) {
-                System.out.println("Error loading data: " + e.getMessage());
-                data = new BankData();
-            }
-        } else {
-            data = new BankData();
-        }
-    }
-
-    //load data on startup.
     public BasicBankingSystem() {
-        loadData();
+        dbManager = new DatabaseManager(DB_URL, DB_USER, DB_PASSWORD);
+        dbManager.initializeDatabase(); // Ensure tables exist
     }
 
-    public static class BankData implements Serializable {
-        @Serial
-        private static final long serialVersionUID = 1L;
-        public HashSet<Long> existingAccountNumbers = new HashSet<>();
-        public HashMap<Long, Account> existingAccounts = new HashMap<>();
-        public HashMap<String, Long> existingEmails = new HashMap<>();
-        public HashMap<Long, Long> existingMobileNumbers = new HashMap<>();
-    }
-
-    public static class Transaction implements Serializable {
-        @Serial
-        private static final long serialVersionUID = 1L;
-        private final long transactionId;
+    // Nested classes (Account, Transaction)
+    public static class Transaction {
+        private long transactionId;
         private final long accountNumber;
         private final String transactionType; // CREDIT or DEBIT
         private final double amount;
         private final Date date;
-        private final String notes;
 
-        public Transaction(long accountNumber,long transactionId, String transactionType, double amount, String notes) {
-            this.transactionId = transactionId;
+        public Transaction(long accountNumber, String transactionType, double amount) {
+            this.transactionId = 0; // Placeholder, the DB will generate the actual ID.
             this.accountNumber = accountNumber;
             this.transactionType = transactionType;
             this.amount = amount;
             this.date = new Date();
-            this.notes = notes;
+        }
+
+        // Constructor for loading an existing transaction from the database.
+        public Transaction(long transactionId, long accountNumber, String transactionType, double amount, Date date) {
+            this.transactionId = transactionId;
+            this.accountNumber = accountNumber;
+            this.transactionType = transactionType;
+            this.amount = amount;
+            this.date = date;
+        }
+
+        // Getters
+        public long getTransactionId() {
+            return transactionId; }
+        public long getAccountNumber() {
+            return accountNumber; }
+        public String getTransactionType() {
+            return transactionType; }
+        public double getAmount() {
+            return amount; }
+        public Date getDate() {
+            return date; }
+
+        // Setters
+        public void setTransactionId(long transactionId) {
+            this.transactionId = transactionId;
         }
 
         @Override
         public String toString() {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
             return "Transaction { " +
                     "ID: " + transactionId +
                     ", Account: " + accountNumber +
                     ", Type: " + transactionType +
-                    ", Amount: " + amount +
-                    ", Date: " + date +
-                    ", Notes: '" + notes + '\'' +
+                    ", Amount: " + String.format("%.2f", amount) +
+                    ", Date: " + sdf.format(date) +
                     " }";
         }
-
     }
 
-    public static class Account implements Serializable {
-        @Serial
-        private static final long serialVersionUID = 1L;
+    public static class Account {
         private String name;
         private Date DOB;
         private long mobileNumber;
@@ -103,9 +91,9 @@ public class BasicBankingSystem {
         private final long accountNumber;
         private String hashedPassword; // SHA-256 hashed password
         private double balance;
-        private final List<Transaction> transactions;
+        private final List<Transaction> transactions; // Transactions will be loaded/saved separately
 
-        public Account(String name,Date DOB, String emailID, long mobileNumber, long aadharNumber, long accountNumber, String hashedPassword) {
+        public Account(String name, Date DOB, String emailID, long mobileNumber, long aadharNumber, long accountNumber, String hashedPassword) {
             this.name = name;
             this.DOB = DOB;
             this.emailID = emailID;
@@ -116,6 +104,39 @@ public class BasicBankingSystem {
             this.balance = 0.0;
             this.transactions = new ArrayList<>();
         }
+
+        // Constructor for loading from DB
+        public Account(long accountNumber, String name, Date DOB, String emailID, long mobileNumber, long aadharNumber, String hashedPassword, double balance) {
+            this.accountNumber = accountNumber;
+            this.name = name;
+            this.DOB = DOB;
+            this.mobileNumber = mobileNumber;
+            this.aadharNumber = aadharNumber;
+            this.emailID = emailID;
+            this.hashedPassword = hashedPassword;
+            this.balance = balance;
+            this.transactions = new ArrayList<>(); // Transactions will be populated by the DB manager
+        }
+
+        // Getters
+        public String getName() {
+            return name; }
+        public Date getDOB() {
+            return DOB; }
+        public long getMobileNumber() {
+            return mobileNumber; }
+        public long getAadharNumber() {
+            return aadharNumber; }
+        public String getEmailID() {
+            return emailID; }
+        public long getAccountNumber() {
+            return accountNumber; }
+        public String getHashedPassword() {
+            return hashedPassword; }
+        public double getBalance() {
+            return balance; }
+        public List<Transaction> getTransactions() {
+            return transactions; } // This will be populated by DB
 
         // Setters
         void setHashedPassword(String hashedPassword){
@@ -138,53 +159,300 @@ public class BasicBankingSystem {
             this.emailID = emailID;
         }
 
+        // Update balance (used by DatabaseManager)
+        void setBalance(double balance) {
+            this.balance = balance;
+        }
+
         // Validate the entered password.
         boolean authenticate(String rawPassword) {
             return verifyPassword(rawPassword, hashedPassword);
         }
 
-        // Deposit money.
-        void deposit(double amount, String notes) {
-            balance += amount;
-            transactions.add(new Transaction(accountNumber, random.nextLong(10000000),"CREDIT", amount, notes));
-            System.out.println("Deposited " + amount + ". New Balance: " + balance);
-        }
-
-        // Withdraw money if sufficient balance.
-        void withdraw(double amount, String notes) {
-            if (amount > balance) {
-                System.out.println("Insufficient funds. Current Balance: " + balance);
-            } else {
-                balance -= amount;
-                transactions.add(new Transaction(accountNumber,random.nextLong(10000000), "DEBIT", amount, notes));
-                System.out.println("Withdrew " + amount + ". New Balance: " + balance);
-            }
-        }
-
-        // Display all transactions for this account.
-        void displayTransactions() {
-            if (transactions.isEmpty()){
-                System.out.println("No transactions available.");
-            } else {
-                System.out.println("Transaction History for Account " + accountNumber + ":");
-                for (Transaction t : transactions) {
-                    System.out.println(t);
-                }
-            }
-        }
-
         @Override
         public String toString() {
+            SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
             return "Account { " +
                     "AccountNumber: " + accountNumber +
                     ", Name: " + name +
                     ", Email: " + emailID +
                     ", Mobile: " + mobileNumber +
                     ", Aadhar: " + aadharNumber +
-                    ", Balance: " + balance +
+                    ", Balance: " + String.format("%.2f", balance) +
+                    ", DOB: " + sdf.format(DOB) +
                     " }";
         }
     }
+
+    // --- DatabaseManager Class ---
+    public static class DatabaseManager {
+        private final String url;
+        private final String user;
+        private final String password;
+
+        public DatabaseManager(String url, String user, String password) {
+            this.url = url;
+            this.user = user;
+            this.password = password;
+            try {
+                Class.forName("com.mysql.cj.jdbc.Driver");
+            } catch (ClassNotFoundException e) {
+                System.err.println("MySQL JDBC Driver not found. Please add it to your classpath.");
+                System.exit(1);
+            }
+        }
+
+        public Connection getConnection() throws SQLException {
+            return DriverManager.getConnection(url, user, password);
+        }
+
+        // Ensure tables exist
+        public void initializeDatabase() {
+            try (Connection conn = getConnection();
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute("CREATE TABLE IF NOT EXISTS accounts (" +
+                        "account_number BIGINT PRIMARY KEY," +
+                        "name VARCHAR(255) NOT NULL," +
+                        "dob DATE NOT NULL," +
+                        "mobile_number BIGINT UNIQUE NOT NULL," +
+                        "aadhar_number BIGINT UNIQUE NOT NULL," +
+                        "email_id VARCHAR(255) UNIQUE NOT NULL," +
+                        "hashed_password VARCHAR(255) NOT NULL," +
+                        "balance DOUBLE DEFAULT 0.0" +
+                        ")");
+
+                stmt.execute("CREATE TABLE IF NOT EXISTS transactions (" +
+                        "transaction_id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+                        "account_number BIGINT NOT NULL," +
+                        "transaction_type VARCHAR(10) NOT NULL," +
+                        "amount DOUBLE NOT NULL," +
+                        "transaction_date DATETIME NOT NULL," +
+                        "FOREIGN KEY (account_number) REFERENCES accounts(account_number) ON DELETE CASCADE" +
+                        ")");
+                System.out.println("Database tables checked/created successfully.");
+            } catch (SQLException e) {
+                System.err.println("Error initializing database: " + e.getMessage());
+            }
+        }
+
+        public boolean doesAccountNumberExist(long accountNumber) {
+            String sql = "SELECT COUNT(*) FROM accounts WHERE account_number = ?";
+            try (Connection conn = getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setLong(1, accountNumber);
+                ResultSet rs = pstmt.executeQuery();
+                if (rs.next()) {
+                    return rs.getInt(1) > 0;
+                }
+            } catch (SQLException e) {
+                System.err.println("Error checking account number existence: " + e.getMessage());
+            }
+            return false;
+        }
+
+        public boolean doesEmailExist(String email) {
+            String sql = "SELECT COUNT(*) FROM accounts WHERE email_id = ?";
+            try (Connection conn = getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setString(1, email);
+                ResultSet rs = pstmt.executeQuery();
+                if (rs.next()) {
+                    return rs.getInt(1) > 0;
+                }
+            } catch (SQLException e) {
+                System.err.println("Error checking email existence: " + e.getMessage());
+            }
+            return false;
+        }
+
+        public boolean doesMobileNumberExist(long mobileNumber) {
+            String sql = "SELECT COUNT(*) FROM accounts WHERE mobile_number = ?";
+            try (Connection conn = getConnection();
+                 PreparedStatement pst = conn.prepareStatement(sql)) {
+                pst.setLong(1, mobileNumber);
+                ResultSet rs = pst.executeQuery();
+                if (rs.next()) {
+                    return rs.getInt(1) > 0;
+                }
+            } catch (SQLException e) {
+                System.err.println("Error checking mobile number existence: " + e.getMessage());
+            }
+            return false;
+        }
+
+        public void createAccount(Account account) {
+            String sql = "INSERT INTO accounts (account_number, name, dob, mobile_number, aadhar_number, email_id, hashed_password, balance) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            try (Connection conn = getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setLong(1, account.getAccountNumber());
+                pstmt.setString(2, account.getName());
+                pstmt.setDate(3, new java.sql.Date(account.getDOB().getTime()));
+                pstmt.setLong(4, account.getMobileNumber());
+                pstmt.setLong(5, account.getAadharNumber());
+                pstmt.setString(6, account.getEmailID());
+                pstmt.setString(7, account.getHashedPassword());
+                pstmt.setDouble(8, account.getBalance());
+                pstmt.executeUpdate();
+                System.out.println("Account saved to database.");
+            } catch (SQLException e) {
+                System.err.println("Error saving account: " + e.getMessage());
+            }
+        }
+
+        public Account getAccountByAccountNumber(long accountNumber) {
+            String sql = "SELECT * FROM accounts WHERE account_number = ?";
+            try (Connection conn = getConnection();
+                 PreparedStatement pst = conn.prepareStatement(sql)) {
+                pst.setLong(1, accountNumber);
+                ResultSet rs = pst.executeQuery();
+                if (rs.next()) {
+                    return new Account(
+                            rs.getLong("account_number"),
+                            rs.getString("name"),
+                            rs.getDate("dob"),
+                            rs.getString("email_id"),
+                            rs.getLong("mobile_number"),
+                            rs.getLong("aadhar_number"),
+                            rs.getString("hashed_password"),
+                            rs.getDouble("balance")
+                    );
+                }
+            } catch (SQLException e) {
+                System.err.println("Error retrieving account: " + e.getMessage());
+            }
+            return null;
+        }
+
+        public Account getAccountByMobileNumber(long mobileNumber) {
+            String sql = "SELECT * FROM accounts WHERE mobile_number = ?";
+            try (Connection conn = getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setLong(1, mobileNumber);
+                ResultSet rs = pstmt.executeQuery();
+                if (rs.next()) {
+                    return new Account(
+                            rs.getLong("account_number"),
+                            rs.getString("name"),
+                            rs.getDate("dob"),
+                            rs.getString("email_id"),
+                            rs.getLong("mobile_number"),
+                            rs.getLong("aadhar_number"),
+                            rs.getString("hashed_password"),
+                            rs.getDouble("balance")
+                    );
+                }
+            } catch (SQLException e) {
+                System.err.println("Error retrieving account by mobile: " + e.getMessage());
+            }
+            return null;
+        }
+
+        public Account getAccountByEmail(String email) {
+            String sql = "SELECT * FROM accounts WHERE email_id = ?";
+            try (Connection conn = getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setString(1, email);
+                ResultSet rs = pstmt.executeQuery();
+                if (rs.next()) {
+                    return new Account(
+                            rs.getLong("account_number"),
+                            rs.getString("name"),
+                            rs.getDate("dob"),
+                            rs.getString("email_id"),
+                            rs.getLong("mobile_number"),
+                            rs.getLong("aadhar_number"),
+                            rs.getString("hashed_password"),
+                            rs.getDouble("balance")
+                    );
+                }
+            } catch (SQLException e) {
+                System.err.println("Error retrieving account by email: " + e.getMessage());
+            }
+            return null;
+        }
+
+
+        public void updateAccount(Connection conn, Account account) throws SQLException {
+            String sql = "UPDATE accounts SET name = ?, dob = ?, mobile_number = ?, aadhar_number = ?, email_id = ?, hashed_password = ?, balance = ? WHERE account_number = ?";
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setString(1, account.getName());
+                pstmt.setDate(2, new java.sql.Date(account.getDOB().getTime()));
+                pstmt.setLong(3, account.getMobileNumber());
+                pstmt.setLong(4, account.getAadharNumber());
+                pstmt.setString(5, account.getEmailID());
+                pstmt.setString(6, account.getHashedPassword());
+                pstmt.setDouble(7, account.getBalance());
+                pstmt.setLong(8, account.getAccountNumber());
+                pstmt.executeUpdate();
+            }
+        }
+
+        // Overloaded method for operations that don't need external transaction management.
+        public void updateAccount(Account account) {
+            try (Connection conn = getConnection()) {
+                updateAccount(conn, account);
+                System.out.println("Account updated in database.");
+            } catch (SQLException e) {
+                System.err.println("Error updating account: " + e.getMessage());
+            }
+        }
+
+        public void deleteAccount(long accountNumber) {
+            String sql = "DELETE FROM accounts WHERE account_number = ?";
+            try (Connection conn = getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setLong(1, accountNumber);
+                pstmt.executeUpdate();
+                System.out.println("Account deleted from database.");
+            } catch (SQLException e) {
+                System.err.println("Error deleting account: " + e.getMessage());
+            }
+        }
+
+        public void addTransaction(Connection conn, Transaction transaction) throws SQLException {
+            String sql = "INSERT INTO transactions (account_number, transaction_type, amount, transaction_date) VALUES (?, ?, ?, ?)";
+            try (PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+                pstmt.setLong(1, transaction.getAccountNumber());
+                pstmt.setString(2, transaction.getTransactionType());
+                pstmt.setDouble(3, transaction.getAmount());
+                pstmt.setTimestamp(4, new Timestamp(transaction.getDate().getTime()));
+                int affectedRows = pstmt.executeUpdate();
+
+                if (affectedRows > 0) {
+                    try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
+                        if (generatedKeys.next()) {
+                            transaction.setTransactionId(generatedKeys.getLong(1));
+                        } else {
+                            throw new SQLException("Creating transaction failed, no ID obtained.");
+                        }
+                    }
+                }
+            }
+        }
+
+        public List<Transaction> getTransactionsForAccount(long accountNumber) {
+            List<Transaction> transactions = new ArrayList<>();
+            String sql = "SELECT * FROM transactions WHERE account_number = ? ORDER BY transaction_date DESC";
+            try (Connection conn = getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setLong(1, accountNumber);
+                ResultSet rs = pstmt.executeQuery();
+                while (rs.next()) {
+                    transactions.add(new Transaction(
+                            rs.getLong("transaction_id"),
+                            rs.getLong("account_number"),
+                            rs.getString("transaction_type"),
+                            rs.getDouble("amount"),
+                            rs.getTimestamp("transaction_date")
+                    ));
+                }
+            } catch (SQLException e) {
+                System.err.println("Error retrieving transactions: " + e.getMessage());
+            }
+            return transactions;
+        }
+    }
+
 
     // Fundamental Section
     String name() {
@@ -206,12 +474,21 @@ public class BasicBankingSystem {
         long number = 0;
         while (!valid) {
             System.out.print("Enter Your Mobile Number: ");
-            number = input.nextLong();
-            input.nextLine();
-            if (String.valueOf(number).length() == 10)
-                valid = true;
-            else
-                System.out.println("Invalid Mobile Number! Please enter a 10-digit number.");
+            String numStr = input.nextLine(); // Read as string
+            try {
+                number = Long.parseLong(numStr);
+                if (numStr.length() == 10) {
+                    if (dbManager.doesMobileNumberExist(number)) {
+                        System.out.println("Mobile number already registered. Please use a different one.");
+                    } else {
+                        valid = true;
+                    }
+                } else {
+                    System.out.println("Invalid Mobile Number! Please enter a 10-digit number.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a numeric 10-digit mobile number.");
+            }
         }
         return number;
     }
@@ -221,12 +498,18 @@ public class BasicBankingSystem {
         long number = 0;
         while (!valid) {
             System.out.print("Enter Your Aadhar Number: ");
-            number = input.nextLong();
-            input.nextLine();
-            if (String.valueOf(number).length() == 12)
-                valid = true;
-            else
-                System.out.println("Invalid Aadhar Number! Please enter a 12-digit number.");
+            String numStr = input.nextLine(); // Read as string
+            try {
+                number = Long.parseLong(numStr);
+                if (numStr.length() == 12) {
+                    // In a real system, you'd check for Aadhar existence in DB
+                    valid = true;
+                } else {
+                    System.out.println("Invalid Aadhar Number! Please enter a 12-digit number.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a numeric 12-digit Aadhar number.");
+            }
         }
         return number;
     }
@@ -238,23 +521,30 @@ public class BasicBankingSystem {
             System.out.print("Enter Your Email: ");
             email = input.nextLine();
             String regex = "^[a-zA-Z0-9_.+%]+@[a-zA-Z0-9_.+%]+\\.[a-zA-Z]{2,}$";
-            valid = Pattern.matches(regex, email);
-            if (!valid)
+            if (Pattern.matches(regex, email)) {
+                if (dbManager.doesEmailExist(email)) {
+                    System.out.println("Email ID already registered. Please use a different one.");
+                } else {
+                    valid = true;
+                }
+            } else {
                 System.out.println("Invalid Email! Please enter a valid email address.");
+            }
         }
         return email;
     }
 
     Date DOB(){
-        System.out.print("Enter Your Date of birth in (dd-mm-yyyy): ");
-        String date = input.nextLine();
         SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+        sdf.setLenient(false); // Make parsing strict
         Date dob = null;
         while (dob == null){
+            System.out.print("Enter Your Date of birth in (dd-mm-yyyy): ");
+            String date = input.nextLine();
             try {
                 dob = sdf.parse(date);
             } catch (ParseException e) {
-                System.out.println("Invalid formate!");
+                System.out.println("Invalid date format or invalid date. Please use dd-mm-yyyy.");
             }
         }
         return dob;
@@ -281,43 +571,63 @@ public class BasicBankingSystem {
         long accountNumber;
         do {
             accountNumber = 100000000000L + Math.abs(random.nextLong() % 900000000000L);
-        } while (data.existingAccountNumbers.contains(accountNumber));
-        data.existingAccountNumbers.add(accountNumber);
+        } while (dbManager.doesAccountNumberExist(accountNumber)); // Check database
         return accountNumber;
     }
 
     // generate 6 digit Password
     private int generateOtp() {
         int otp = 100000 + random.nextInt(900000);
-        System.out.println("Generated OTP: " + otp);
+        System.out.println("Generated OTP: " + otp); // In a real app, this would be sent via SMS/Email
         return otp;
     }
 
-     private boolean verifyOtp() {
+    private boolean verifyOtp() {
         final int MAX_ATTEMPT = 3;
         int otp = generateOtp();
-         for (int i = 0; i < MAX_ATTEMPT; i++) {
-             System.out.print("Enter Password: ");
-             int entered = input.nextInt();
-             if(otp == entered){
-                 return true;
-             } else {
-                 System.out.println("Incorrect OTP");
-                 if(i < MAX_ATTEMPT - 1){
-                     System.out.println("1. Re-enter, 2. Resend OTP, and 3. cancel.");
-                     System.out.print("Enter option: ");
-                     byte option = input.nextByte();
-                     if(option == 3){
-                         return false;
-                     }
-                     if(option == 2){
-                         otp = generateOtp();
-                         System.out.println("Re-generated OTP is: " + otp);
-                     }
-                 }
-             }
-         }
-         return false;
+        for (int i = 0; i < MAX_ATTEMPT; i++) {
+            System.out.print("Enter OTP: "); 
+            int entered;
+            try {
+                entered = input.nextInt();
+                input.nextLine(); // consume newline
+            } catch (InputMismatchException e) {
+                System.out.println("Invalid input. Please enter a number.");
+                input.nextLine(); // consume the invalid input
+                i--; // Decrement i to not count this as an attempt
+                continue;
+            }
+
+            if(otp == entered){
+                return true;
+            } else {
+                System.out.println("Incorrect OTP");
+                if(i < MAX_ATTEMPT - 1){
+                    System.out.println("1. Re-enter, 2. Resend OTP, and 3. cancel.");
+                    System.out.print("Enter option: ");
+                    byte option;
+                    try {
+                        option = input.nextByte();
+                        input.nextLine(); // consume newline
+                    } catch (InputMismatchException e) {
+                        System.out.println("Invalid input. Please enter a number.");
+                        input.nextLine();
+                        i--; // Decrement i to not count this as an attempt
+                        continue;
+                    }
+
+                    if(option == 3){
+                        return false;
+                    }
+                    if(option == 2){
+                        otp = generateOtp();
+                        System.out.println("Re-generated OTP is: " + otp);
+                    }
+                }
+            }
+        }
+        System.out.println("Maximum OTP attempts reached.");
+        return false;
     }
 
     // Generate Password of length between 12 and 16
@@ -329,29 +639,28 @@ public class BasicBankingSystem {
         String DIGITS = "0123456789";
         String SPECIAL = "!@#$%^&*()-_=+<>?";
         String ALL = UPPER + LOWER + DIGITS + SPECIAL;
-        int choice = 1;
-        for (int i = 0; i < len; i++) {
-            if (i % 3 == 0) {
-                switch (choice) {
-                    case 1:
-                        password.append(UPPER.charAt(random.nextInt(UPPER.length())));
-                        break;
-                    case 2:
-                        password.append(LOWER.charAt(random.nextInt(LOWER.length())));
-                        break;
-                    case 3:
-                        password.append(DIGITS.charAt(random.nextInt(DIGITS.length())));
-                        break;
-                    default:
-                        password.append(SPECIAL.charAt(random.nextInt(SPECIAL.length())));
-                        break;
-                }
-                choice = (choice % 4) + 1;
-            } else {
-                password.append(ALL.charAt(random.nextInt(ALL.length())));
-            }
+
+        // Ensure at least one of each character type
+        password.append(UPPER.charAt(random.nextInt(UPPER.length())));
+        password.append(LOWER.charAt(random.nextInt(LOWER.length())));
+        password.append(DIGITS.charAt(random.nextInt(DIGITS.length())));
+        password.append(SPECIAL.charAt(random.nextInt(SPECIAL.length())));
+
+        for (int i = 4; i < len; i++) { // Start from 4 as 4 chars are already added
+            password.append(ALL.charAt(random.nextInt(ALL.length())));
         }
-        return password.toString();
+
+        // Shuffle the password to mix the required characters
+        List<Character> chars = new ArrayList<>();
+        for (char c : password.toString().toCharArray()) {
+            chars.add(c);
+        }
+        Collections.shuffle(chars);
+        StringBuilder shuffledPassword = new StringBuilder();
+        for (char c : chars) {
+            shuffledPassword.append(c);
+        }
+        return shuffledPassword.toString();
     }
 
     // Generate password with salt value
@@ -367,7 +676,6 @@ public class BasicBankingSystem {
 
     private static String SHA256(String password){
         try{
-            // SHA-256 produce 256 bits or 64 bytes of hexadecimal values
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(password.getBytes(StandardCharsets.UTF_8));
             StringBuilder hexString = new StringBuilder();
@@ -379,33 +687,45 @@ public class BasicBankingSystem {
             }
             return hexString.toString();
         } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("SHA-256 algorithm not found.", e);
         }
     }
 
     private static boolean verifyPassword(String rawPassword, String hashedPassword) {
-        String[] parts = hashedPassword.split(":"); //
+        String[] parts = hashedPassword.split(":");
         if(parts.length != 2){
-            throw new IllegalArgumentException("Invalid Stored Password!");
+            // This could happen if a stored password is corrupted or not in the expected format
+            System.err.println("Error: Invalid stored password format.");
+            return false;
         }
-        String saltedPassword = parts[0] + rawPassword;
+        String saltStr = parts[0];
+        String storedHash = parts[1];
+        String saltedPassword = saltStr + rawPassword;
 
-        return parts[1].equals(SHA256(saltedPassword));
+        return storedHash.equals(SHA256(saltedPassword));
     }
 
     String createPassword() {
-        System.out.print("1. System Generated Password, 2. own password: ");
-        int choice = input.nextInt();
-        input.nextLine();
+        System.out.print("1. System Generated Password, 2. Own password: ");
+        int choice;
+        try {
+            choice = input.nextInt();
+            input.nextLine(); // Consume newline
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Choosing System Generated Password.");
+            input.nextLine();
+            choice = 1;
+        }
+
         String password = "";
         if (choice == 1) {
             password = generatePassword();
             System.out.println("Generated Password: " + password);
         } else {
-            Console console = System.console();
+            boolean passwordSet = false;
             for (int i = 0; i < 3; i++) {
-                System.out.println("Password must contain 8 characters and must contain uppercase letter, " +
-                        "lowercase letter, digit, and special character.");
+                System.out.println("Password must contain at least 8 characters, one uppercase letter, " +
+                        "one lowercase letter, one digit, and one special character.");
                 if (console != null) {
                     char[] passArray = console.readPassword("Enter Password: ");
                     password = new String(passArray);
@@ -414,14 +734,16 @@ public class BasicBankingSystem {
                     password = input.nextLine();
                 }
                 if (checkValidPassword(password)) {
+                    passwordSet = true;
                     break;
                 } else {
                     System.out.println("Password does not meet the required criteria. Please try again.");
                 }
-                if(i == 2){
-                    System.out.println("----You exceed limit, So default password generated!-----");
-                    password = generatePassword();
-                }
+            }
+            if (!passwordSet) {
+                System.out.println("----You exceeded attempts. Generating a default password.-----");
+                password = generatePassword();
+                System.out.println("Generated Password: " + password);
             }
         }
         return hashPassword(password);
@@ -444,9 +766,7 @@ public class BasicBankingSystem {
 
         String hashedPwd = createPassword();
         Account newAccount = new Account(name, DOB, email, mobile, aadhar, accountNumber, hashedPwd);
-        data.existingAccounts.put(accountNumber, newAccount);
-        data.existingEmails.put(email, accountNumber);
-        data.existingMobileNumbers.put(mobile, accountNumber);
+        dbManager.createAccount(newAccount); // Save to database
 
         System.out.println("Account created successfully!");
         System.out.println(newAccount);
@@ -461,15 +781,29 @@ public class BasicBankingSystem {
             return;
         }
         System.out.print("Enter Account Number: ");
-        long accNum = input.nextLong();
-        input.nextLine(); // clear nextLine buffer
-        Account acc = data.existingAccounts.get(accNum);
-        if (acc == null) {
-            System.out.println("Invalid Account Number. Account deletion failed.");
+        long accNum;
+        try {
+            accNum = input.nextLong();
+            input.nextLine(); // clear nextLine buffer
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a numeric account number.");
+            input.nextLine();
             return;
         }
-        System.out.print("Enter Password: ");
-        String password = input.nextLine();
+
+        Account acc = dbManager.getAccountByAccountNumber(accNum);
+        if (acc == null) {
+            System.out.println("Account Not Found. Account deletion failed.");
+            return;
+        }
+        String password;
+        if (console != null) {
+            char[] passArray = console.readPassword("Enter Password: ");
+            password = new String(passArray);
+        } else {
+            System.out.print("Enter Password: ");
+            password = input.nextLine();
+        }
         if (!acc.authenticate(password)) {
             System.out.println("Incorrect Password. Account deletion failed.");
             return;
@@ -479,17 +813,14 @@ public class BasicBankingSystem {
             return;
         }
         // Final confirmation before deletion
-        System.out.print("Are you sure, you want to delete this account? This action cannot be undo. (y/n): ");
+        System.out.print("Are you sure, you want to delete this account? This action cannot be undone. (y/n): ");
         String confirmation = input.nextLine().trim().toLowerCase();
         if (!confirmation.equals("y")) {
             System.out.println("Account deletion canceled.");
             return;
         }
-        // Remove account from all data structures
-        data.existingAccounts.remove(accNum);
-        data.existingEmails.remove(acc.emailID);
-        data.existingMobileNumbers.remove(acc.mobileNumber);
-        data.existingAccountNumbers.remove(accNum);
+        // Remove account from database
+        dbManager.deleteAccount(accNum);
 
         System.out.println("------------- Account Successfully Deleted! ------------");
     }
@@ -501,15 +832,29 @@ public class BasicBankingSystem {
             return null;
         }
         System.out.print("Enter Account Number: ");
-        long accNum = input.nextLong();
-        input.nextLine();
-        Account acc = data.existingAccounts.get(accNum);
-        if (acc == null) {
-            System.out.println("Account Not Found");
+        long accNum;
+        try {
+            accNum = input.nextLong();
+            input.nextLine();
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a numeric account number.");
+            input.nextLine();
             return null;
         }
-        System.out.print("Enter Password: ");
-        String password = input.nextLine();
+
+        Account acc = dbManager.getAccountByAccountNumber(accNum);
+        if (acc == null) {
+            System.out.println("Account Not Found.");
+            return null;
+        }
+        String password;
+        if (console != null) {
+            char[] passArray = console.readPassword("Enter Password: ");
+            password = new String(passArray);
+        } else {
+            System.out.print("Enter Password: ");
+            password = input.nextLine();
+        }
         if(!acc.authenticate(password)){
             System.out.println("Invalid Password!");
             return null;
@@ -524,32 +869,44 @@ public class BasicBankingSystem {
     void updateName() {
         Account acc = getAccountForUpdate("update Name");
         if (acc != null) {
-            acc.setName(name());
-            System.out.println("Name Successfully Updated!");
+            String oldName = acc.getName();
+            String newName = name();
+            acc.setName(newName);
+            dbManager.updateAccount(acc);
+            System.out.println("Name Successfully Updated from '" + oldName + "' to '" + newName + "'!");
         }
     }
 
     void updateMobileNumber() {
         Account acc = getAccountForUpdate("update Mobile Number");
         if (acc != null) {
-            acc.setMobileNumber(mobileNumber());
-            System.out.println("Mobile Number Successfully Updated!");
+            long oldMobile = acc.getMobileNumber();
+            long newMobile = mobileNumber(); // This method now checks for existence
+            acc.setMobileNumber(newMobile);
+            dbManager.updateAccount(acc);
+            System.out.println("Mobile Number Successfully Updated from " + oldMobile + " to " + newMobile + "!");
         }
     }
 
     void updateAadharNumber() {
         Account acc = getAccountForUpdate("update Aadhar Number");
         if (acc != null) {
-            acc.setAadharNumber(aadharNumber());
-            System.out.println("Aadhar Number Successfully Updated!");
+            long oldAadhar = acc.getAadharNumber();
+            long newAadhar = aadharNumber();
+            acc.setAadharNumber(newAadhar);
+            dbManager.updateAccount(acc);
+            System.out.println("Aadhar Number Successfully Updated from " + oldAadhar + " to " + newAadhar + "!");
         }
     }
 
     void updateEmailID() {
         Account acc = getAccountForUpdate("update Email ID");
         if (acc != null) {
-            acc.setEmailID(email());
-            System.out.println("Email ID Successfully Updated!");
+            String oldEmail = acc.getEmailID();
+            String newEmail = email(); // This method now checks for existence
+            acc.setEmailID(newEmail);
+            dbManager.updateAccount(acc);
+            System.out.println("Email ID Successfully Updated from '" + oldEmail + "' to '" + newEmail + "'!");
         }
     }
 
@@ -557,51 +914,55 @@ public class BasicBankingSystem {
         Account acc = getAccountForUpdate("update Password");
         if (acc != null) {
             acc.setHashedPassword(createPassword());
+            dbManager.updateAccount(acc);
             System.out.println("Password Successfully Updated!");
         }
     }
 
     void resetPassword(){
-        System.out.print("Do you want to Update Password (y/n): ");
+        System.out.print("Do you want to Reset Password (y/n): ");
         String str = input.nextLine().trim().toLowerCase();
         if (!str.equals("y")) {
             return;
         }
         System.out.print("Enter Account Number: ");
-        long accNum = input.nextLong();
-        input.nextLine();
-        Account acc = data.existingAccounts.get(accNum);
+        long accNum;
+        try {
+            accNum = input.nextLong();
+            input.nextLine();
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a numeric account number.");
+            input.nextLine();
+            return;
+        }
+
+        Account acc = dbManager.getAccountByAccountNumber(accNum);
         if (acc == null) {
-            System.out.println("Account Not Found");
+            System.out.println("Account Not Found.");
             return;
         }
-        System.out.print("Enter Your Date of birth in (dd-mm-yyyy): ");
-        String date = input.nextLine();
-        SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
-        Date dob = null;
-        while (dob == null){
-            try {
-                dob = sdf.parse(date);
-            } catch (ParseException e) {
-                System.out.println("Invalid formate!");
-            }
-        }
-        if(!(acc.DOB == dob)){
-            System.out.println("Invalid Data fo Birth!");
-            return;
-        }
+
         System.out.print("Enter Mobile number: ");
-        long mob = input.nextLong();
-        input.nextLine();
-        if(acc.mobileNumber == mob){
+        long mob;
+        try {
+            mob = input.nextLong();
+            input.nextLine();
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a numeric mobile number.");
+            input.nextLine();
+            return;
+        }
+
+        if(acc.getMobileNumber() == mob){
             if(verifyOtp()){
-                acc.hashedPassword = createPassword();
+                acc.setHashedPassword(createPassword());
+                dbManager.updateAccount(acc);
                 System.out.println("----------Password Reset Successfully!----------");
             } else {
-                System.out.println("Invalid OTP!");
+                System.out.println("OTP verification failed. Password reset aborted.");
             }
         } else {
-            System.out.println("Invalid Mobile Number");
+            System.out.println("Invalid Mobile Number.");
         }
     }
 
@@ -609,52 +970,97 @@ public class BasicBankingSystem {
     // Account Menu Section
     private long loginWithAccNum(){
         System.out.print("Enter Account Number: ");
-        long accNum = input.nextLong();
-        input.nextLine();
+        long accNum;
+        try {
+            accNum = input.nextLong();
+            input.nextLine();
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a numeric account number.");
+            input.nextLine();
+            return -1;
+        }
         return accNum;
     }
 
     private long loginWithMob(){
         System.out.print("Enter Mobile Number: ");
-        long mob = input.nextLong();
-        input.nextLine();
-        Long accNum = data.existingMobileNumbers.get(mob);
-        if(accNum == null){
-            System.out.println("Invalid Mobile Number");
+        long mob;
+        try {
+            mob = input.nextLong();
+            input.nextLine();
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a numeric mobile number.");
+            input.nextLine();
             return -1;
         }
-        return accNum;
+        Account acc = dbManager.getAccountByMobileNumber(mob);
+        if(acc == null){
+            System.out.println("Invalid Mobile Number or Account Not Found.");
+            return -1;
+        }
+        return acc.getAccountNumber();
     }
 
     private long loginWithEmail(){
         System.out.print("Enter Email id: ");
         String email = input.nextLine();
-        Long accNum = data.existingEmails.get(email);
-        if(accNum == null){
-            System.out.println("Invalid Email ID");
+        Account acc = dbManager.getAccountByEmail(email);
+        if(acc == null){
+            System.out.println("Invalid Email ID or Account Not Found.");
             return -1;
         }
-        return accNum;
+        return acc.getAccountNumber();
     }
 
     private Account login() {
-        System.out.println("Login with");
-        System.out.println("1. Account Number, 2. Mobile Number, and 3. Email id.");
+        System.out.println("Login with:");
+        System.out.println("1. Account Number");
+        System.out.println("2. Mobile Number");
+        System.out.println("3. Email ID");
         System.out.print("Enter Option: ");
-        byte option = input.nextByte();
-        input.nextLine();
-        long accNum = switch (option) {
-            case 2 -> loginWithMob();
-            case 3 -> loginWithEmail();
-            default -> loginWithAccNum();
-            };
-        Account acc = data.existingAccounts.get(accNum);
+        byte option;
+        try {
+            option = input.nextByte();
+            input.nextLine(); // Consume newline
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a number between 1-3.");
+            input.nextLine();
+            return null;
+        }
+
+        long accNum = -1;
+        switch (option) {
+            case 1:
+                accNum = loginWithAccNum();
+                break;
+            case 2:
+                accNum = loginWithMob();
+                break;
+            case 3:
+                accNum = loginWithEmail();
+                break;
+            default:
+                System.out.println("Invalid option.");
+                return null;
+        }
+
+        if (accNum == -1) {
+            return null; // Login method returned invalid number or account not found
+        }
+
+        Account acc = dbManager.getAccountByAccountNumber(accNum);
         if (acc == null) {
             System.out.println("Account not found!");
             return null;
         }
-        System.out.print("Enter Password: ");
-        String password = input.nextLine();
+        String password;
+        if (console != null) {
+            char[] passArray = console.readPassword("Enter Password: ");
+            password = new String(passArray);
+        } else {
+            System.out.print("Enter Password: ");
+            password = input.nextLine();
+        }
         if (acc.authenticate(password)) {
             if(!verifyOtp()){
                 System.out.println("OTP verification failed, Account login Aborted!");
@@ -667,44 +1073,162 @@ public class BasicBankingSystem {
             return null;
         }
     }
-
+    
     void depositMoney(Account acc) {
-        if (acc != null) {
-            System.out.print("Enter amount to deposit: ");
-            double amount = input.nextDouble();
+        if (acc == null) return;
+
+        System.out.print("Enter amount to deposit: ");
+        double amount;
+        try {
+            amount = input.nextDouble();
             input.nextLine();
-            System.out.print("Enter deposit notes: ");
-            String notes = input.nextLine();
-            acc.deposit(amount, notes);
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a numeric amount.");
+            input.nextLine();
+            return;
+        }
+
+        if (amount <= 0) {
+            System.out.println("Deposit amount must be positive.");
+            return;
+        }
+
+        Connection conn = null;
+        try {
+            conn = dbManager.getConnection();
+            conn.setAutoCommit(false); // Start transaction
+
+            // Step 1: Update balance in the Java object
+            double newBalance = acc.getBalance() + amount;
+            acc.setBalance(newBalance);
+
+            // Step 2: Create transaction record in DB
+            Transaction transaction = new Transaction(acc.getAccountNumber(), "CREDIT", amount);
+            dbManager.addTransaction(conn, transaction);
+
+            // Step 3: Update account balance in DB
+            dbManager.updateAccount(conn, acc);
+
+            conn.commit(); // Commit transaction if both operations succeed
+            System.out.println("Deposited " + String.format("%.2f", amount) + ". New Balance: " + String.format("%.2f", acc.getBalance()));
+
+        } catch (SQLException e) {
+            System.err.println("Transaction failed: " + e.getMessage());
+            if (conn != null) {
+                try {
+                    conn.rollback(); // Rollback on error
+                    System.err.println("Transaction has been rolled back.");
+                    // Revert balance in the Java object
+                    acc.setBalance(acc.getBalance() - amount);
+                } catch (SQLException ex) {
+                    System.err.println("Error during rollback: " + ex.getMessage());
+                }
+            }
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.close();
+                } catch (SQLException e) {
+                    System.err.println("Error closing connection: " + e.getMessage());
+                }
+            }
         }
     }
 
     void withdrawMoney(Account acc) {
-        if (acc != null) {
-            System.out.print("Enter amount to withdraw: ");
-            double amount = input.nextDouble();
+        if (acc == null) return;
+
+        System.out.print("Enter amount to withdraw: ");
+        double amount;
+        try {
+            amount = input.nextDouble();
             input.nextLine();
-            System.out.print("Enter withdrawal notes: ");
-            String notes = input.nextLine();
-            acc.withdraw(amount, notes);
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a numeric amount.");
+            input.nextLine();
+            return;
+        }
+
+        if (amount <= 0) {
+            System.out.println("Withdrawal amount must be positive.");
+            return;
+        }
+
+        if (amount > acc.getBalance()) {
+            System.out.println("Insufficient funds. Current Balance: " + String.format("%.2f", acc.getBalance()));
+            return;
+        }
+
+        Connection conn = null;
+        try {
+            conn = dbManager.getConnection();
+            conn.setAutoCommit(false); // Start transaction
+
+            // Step 1: Update balance in the Java object
+            double newBalance = acc.getBalance() - amount;
+            acc.setBalance(newBalance);
+
+            // Step 2: Create transaction record
+            Transaction transaction = new Transaction(acc.getAccountNumber(), "DEBIT", amount);
+            dbManager.addTransaction(conn, transaction);
+
+            // Step 3: Update account balance in DB
+            dbManager.updateAccount(conn, acc);
+
+            conn.commit(); // Commit transaction
+            System.out.println("Withdrew " + String.format("%.2f", amount) + ". New Balance: " + String.format("%.2f", acc.getBalance()));
+
+        } catch (SQLException e) {
+            System.err.println("Transaction failed: " + e.getMessage());
+            if (conn != null) {
+                try {
+                    conn.rollback(); // Rollback on error
+                    System.err.println("Transaction has been rolled back.");
+                    // Revert balance in the Java object
+                    acc.setBalance(acc.getBalance() + amount);
+                } catch (SQLException ex) {
+                    System.err.println("Error during rollback: " + ex.getMessage());
+                }
+            }
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.close();
+                } catch (SQLException e) {
+                    System.err.println("Error closing connection: " + e.getMessage());
+                }
+            }
         }
     }
 
+
     void checkBalance(Account acc){
         if(acc != null){
-            System.out.println("Your bank balance is: " + acc.balance);
+            Account tempAcc = dbManager.getAccountByAccountNumber(acc.getAccountNumber());
+            if (tempAcc != null) {
+                System.out.println("Your current bank balance is: " + String.format("%.2f", tempAcc.getBalance()));
+            } else {
+                System.out.println("Could not fetch latest balance. Account might have been deleted.");
+            }
         }
     }
 
     void displayTransactions(Account acc) {
         if (acc != null) {
-            acc.displayTransactions();
+            List<Transaction> transactions = dbManager.getTransactionsForAccount(acc.getAccountNumber());
+            if (transactions.isEmpty()){
+                System.out.println("No transactions available for Account " + acc.getAccountNumber() + ".");
+            } else {
+                System.out.println("Transaction History for Account " + acc.getAccountNumber() + ":");
+                for (Transaction t : transactions) {
+                    System.out.println(t);
+                }
+            }
         }
     }
 
-
     private void accountControlCenter(){
-        System.out.println("======================== Account Control Center ==========================");
+        System.out.println("\n======================== Account Control Center ==========================");
         System.out.println("1. Delete Account");
         System.out.println("2. Update Password");
         System.out.println("3. Update Name");
@@ -713,7 +1237,16 @@ public class BasicBankingSystem {
         System.out.println("6. Update Email ID");
         System.out.println("7. Reset Password");
         System.out.print("Enter Option: ");
-        byte option = input.nextByte();
+        byte option;
+        try {
+            option = input.nextByte();
+            input.nextLine();
+        } catch (InputMismatchException e) {
+            System.out.println("Invalid input. Please enter a number between 1-7.");
+            input.nextLine();
+            return;
+        }
+
         switch (option){
             case 1:
                 deleteAccount();
@@ -746,17 +1279,26 @@ public class BasicBankingSystem {
         if(acc == null){
             return;
         }
-        System.out.println("================== Welcome in Your Account =====================");
+        System.out.println("================== Welcome to Your Account =====================");
         boolean exit = false;
         while (!exit){
-            System.out.println("1. Deposit");
-            System.out.println("2. withdrawal");
-            System.out.println("3. view transaction history");
-            System.out.println("4. view balance");
-            System.out.println("5. view Account detail");
-            System.out.println("6. Main Menu");
-            System.out.print("choose an option: ");
-            byte option= input.nextByte();
+            System.out.println("\n1. Deposit");
+            System.out.println("2. Withdrawal");
+            System.out.println("3. View Transaction History");
+            System.out.println("4. View Balance");
+            System.out.println("5. View Account Detail");
+            System.out.println("6. Logout");
+            System.out.print("Choose an option: ");
+            byte option;
+            try {
+                option = input.nextByte();
+                input.nextLine(); // Consume newline
+            } catch (InputMismatchException e) {
+                System.out.println("Invalid input. Please enter a number between 1-6.");
+                input.nextLine();
+                continue;
+            }
+
             switch (option){
                 case 1:
                     depositMoney(acc);
@@ -771,32 +1313,46 @@ public class BasicBankingSystem {
                     checkBalance(acc);
                     break;
                 case 5:
-                    System.out.println(acc);
+                    // Fetch latest account details to ensure up-to-date info
+                    Account latestAccDetails = dbManager.getAccountByAccountNumber(acc.getAccountNumber());
+                    if (latestAccDetails != null) {
+                        System.out.println(latestAccDetails);
+                    } else {
+                        System.out.println("Account details could not be retrieved. It might have been deleted.");
+                        exit = true; // Force exit if account is gone
+                    }
                     break;
                 case 6:
-                    System.out.println("Exit from Account");
+                    System.out.println("Logged out from Account " + acc.getAccountNumber() + ".");
                     exit = true;
                     break;
                 default:
-                    System.out.println("Enter valid Number");
+                    System.out.println("Invalid option. Please try again.");
             }
-
         }
     }
 
     // Main Menu
     public void menu() {
-        System.out.println("\n==================== Welcome in Basic Bank Account System =========================");
+        System.out.println("\n==================== Welcome to Basic Bank Account System =========================");
 
         boolean exit = false;
         while (!exit) {
-            System.out.println("1. Create Account");
-            System.out.println("2. Login Account");
+            System.out.println("\n1. Create Account");
+            System.out.println("2. Login to Account");
             System.out.println("3. Account Control Center");
             System.out.println("4. Exit");
             System.out.print("Choose an option: ");
-            int option = input.nextInt();
-            input.nextLine();
+            int option;
+            try {
+                option = input.nextInt();
+                input.nextLine(); // Consume newline
+            } catch (InputMismatchException e) {
+                System.out.println("Invalid input. Please enter a number between 1-4.");
+                input.nextLine();
+                continue;
+            }
+
             switch (option) {
                 case 1:
                     createAccount();
@@ -809,7 +1365,6 @@ public class BasicBankingSystem {
                     break;
                 case 4:
                     exit = true;
-                    saveData();
                     System.out.println("Exiting system. Goodbye!");
                     break;
                 default:
